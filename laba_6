@@ -13,10 +13,14 @@ def iter(n):
         return 2
     if n == 2:
         return 4
-    a, b = 2, 4
-    for i in range(3, n + 1):
-        c = ((-1) ** i) * (b - a / (3 * factorial(i)))
+    
+    a, b = 2, 4  # E(1) и E(2)
+    current_fact = 6  # 3! (для n=3)
+    
+    for i in range(3, n+1):
+        c = ((-1)**i) * (b - a/(3*current_fact))
         a, b = b, c
+        current_fact *= (i+1)
     return b
 
 print("n | Рекурсия (сек) | Итерация (сек)")
