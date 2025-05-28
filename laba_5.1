@@ -1,0 +1,53 @@
+import itertools
+import timeit
+
+components = [
+    ["Asus", "MSI", "Gigabyte"],  # Материнские платы
+    ["Intel", "AMD"],              # Процессоры
+    ["Samsung", "Kingston", "Corsair", "HyperX"]  # Память
+]
+
+def nested_loops_method():
+    configs = []
+    for mb in components[0]:
+        for cpu in components[1]:
+            for ram in components[2]:
+                configs.append([mb, cpu, ram])
+    return configs
+
+def itertools_method():
+    return [list(combo) for combo in itertools.product(*components)]
+
+print("Сравнение методов генерации комплектаций\n")
+
+nested_loops_method()
+loop_time = timeit.timeit('nested_loops_method()', globals=globals(), number=10000)/10000
+
+itertools_method()
+itertools_time = timeit.timeit('itertools_method()', globals=globals(), number=10000)/10000
+
+loop_configs = nested_loops_method()
+itertools_configs = itertools_method()
+
+if loop_configs == itertools_configs:
+    print("Результаты идентичны")
+else:
+    print("Результаты различаются")
+
+print(f"\nМетод с вложенными циклами:")
+print(f"Время выполнения: {loop_time:.6f} сек")
+print("Все возможные комплектации:")
+i = 1
+for config in loop_configs:
+    print(f"{i} - Материнская плата: {config[0]}, Процессор: {config[1]}, Память: {config[2]}")
+    i += 1
+
+print(f"\nМетод с itertools.product:")
+print(f"Время выполнения: {itertools_time:.6f} сек")
+print("Все возможные комплектации:")
+i = 1
+for config in itertools_configs:
+    print(f"{i} - Материнская плата: {config[0]}, Процессор: {config[1]}, Память: {config[2]}")
+    i += 1
+
+print(f"\nРазница во времени: {abs(loop_time - itertools_time):.6f} сек")
