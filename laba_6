@@ -23,8 +23,8 @@ print("n | Рекурсия (сек) | Итерация (сек)")
 print("----------------------------------")
 
 for n in range(1, 16):
-    time_rec = timeit.timeit(lambda: rec(n), number=100) / 100
-    time_iter = timeit.timeit(lambda: iter(n), number=100) / 100
+    time_rec = timeit.timeit(lambda: rec(n), number=10000) / 10000
+    time_iter = timeit.timeit(lambda: iter(n), number=10000) / 10000
     print(f"{n}  {time_rec:.6f}       {time_iter:.6f}")
 
 print("\nВывод:")
