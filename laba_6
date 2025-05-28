@@ -17,7 +17,6 @@ def iter(n):
     for i in range(3, n + 1):
         c = ((-1) ** i) * (b - a / (3 * factorial(i)))
         a, b = b, c
-
     return b
 
 print("n | Рекурсия (сек) | Итерация (сек)")
