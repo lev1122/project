@@ -1,47 +1,38 @@
 import itertools
 
 components = [
-    [("Asus", 120, 4), ("MSI", 150, 5), ("Gigabyte", 200, 3)],  # Материнские платы
-    [("Intel", 250, 4), ("AMD", 230, 5)],  # Процессоры
-    [("Samsung", 90, 3), ("Kingston", 150, 4), ("Corsair", 170, 5)]  # Оперативная память
+    # Материнские платы
+    [("Asus", 120, 4), ("MSI", 150, 5), ("Gigabyte", 200, 3)],
+    # Процессоры
+    [("Intel", 250, 4), ("AMD", 230, 5)],
+    # Модули оперативной памяти
+    [("Samsung", 90, 3), ("Kingston", 150, 4), ("Corsair", 170, 5)]
 ]
 
 MAX_PRICE = 500
 MIN_RATING = 12
 
-def find_all_valid_configs():
-    valid_configs = []
+def find_best_pc():
+    best_pc = None
+    min_price = MAX_PRICE + 1
 
     for mb, cpu, ram in itertools.product(*components):
         total_price = mb[1] + cpu[1] + ram[1]
         total_rating = mb[2] + cpu[2] + ram[2]
 
         if total_price <= MAX_PRICE and total_rating >= MIN_RATING:
-            config = {
-                "Материнская плата": mb[0],
-                "Процессор": cpu[0],
-                "Оперативная память": ram[0],
-                "Цена": total_price,
-                "Рейтинг": total_rating
-            }
-            valid_configs.append(config)
-    return valid_configs
+            if total_price < min_price:
+                min_price = total_price
+                best_pc = (mb, cpu, ram)
 
-def print_all_configs(configs):
-    if not configs:
+    if best_pc:
+        print(" Лучшая сборка ")
+        print(f"Материнка: {best_pc[0][0]} (${best_pc[0][1]}, {best_pc[0][2]})")
+        print(f"Процессор: {best_pc[1][0]} (${best_pc[1][1]}, {best_pc[1][2]})")
+        print(f"Память: {best_pc[2][0]} (${best_pc[2][1]}, {best_pc[2][2]})")
+        print(f"\nИтого: ${min_price}")
+        print(f"Общий рейтинг: {sum(c[2] for c in best_pc)}/15")
+    else:
         print("Не найдено подходящих вариантов :(")
-        return
 
-    print(f"Найдено {len(configs)} вариантов сборки:\n")
-
-    for i, config in enumerate(configs, 1):
-        print(f" Вариант №{i}:")
-        print(f"   Материнская плата: {config['Материнская плата']}")
-        print(f"   Процессор: {config['Процессор']}")
-        print(f"   Оперативная память: {config['Оперативная память']}")
-        print(f"   Общая стоимость: ${config['Цена']}")
-        print(f"   Суммарный рейтинг: {config['Рейтинг']}/15")
-        print("-" * 40)
-
-all_configs = find_all_valid_configs()
-print_all_configs(all_configs)
+find_best_pc()
