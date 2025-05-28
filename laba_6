@@ -22,9 +22,7 @@ def compare_with_timeit(max_n=15, repeats=1000):
     print("----------------------------------")
 
     for n in range(1, max_n + 1):
-        # Измеряем рекурсивный метод
         rec_time = timeit.timeit(lambda: recursive_f(n), number=repeats) * 1000 / repeats
-        # Измеряем итерационный метод
         iter_time = timeit.timeit(lambda: iterative_f(n), number=repeats) * 1000 / repeats
 
         print(f"{n}\t{rec_time:.4f}\t\t{iter_time:.4f}")
