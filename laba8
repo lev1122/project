@@ -1,0 +1,198 @@
+import tkinter as tk
+from tkinter import Canvas, colorchooser, filedialog, messagebox
+import csv
+import math
+
+class Triangle:
+    def __init__(self, master):
+        self.master = master
+        self.master.configure(background="#A8E4A0")
+
+        self.canvas = Canvas(master, bg="white") 
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        self.start_x = None
+        self.start_y = None
+        self.current_triangle = None
+        self.selected_triangle = None
+        self.triangles = []  # [([x1,y1,x2,y2,x3,y3], color)]
+        self.current_color = "#000000"
+        self.id_map = {}
+
+        self.canvas.bind("<Button-1>", self.nazhatie_knopki)
+        self.canvas.bind("<B1-Motion>", self.peretaskivanie_mishki)
+        self.canvas.bind("<ButtonRelease-1>", self.finish_dobavleniya)
+        self.canvas.bind("<Button-3>", self.nazhatie_pravoi_knopki)
+
+    def nazhatie_knopki(self, event):
+        self.start_x = event.x
+        self.start_y = event.y
+        self.current_triangle = [self.start_x, self.start_y, self.start_x, self.start_y, self.start_x, self.start_y]
+
+    def peretaskivanie_mishki(self, event):
+        if self.current_triangle:
+            self.current_triangle[2] = event.x
+            self.current_triangle[3] = event.y
+            self.current_triangle[4] = (self.start_x + event.x) / 2
+            self.current_triangle[5] = event.y
+            self.pererisovka_canvas()
+
+    def finish_dobavleniya(self, event):
+        if self.current_triangle:
+            self.triangles.append((self.current_triangle[:], self.current_color))
+            self.current_triangle = None
+            self.pererisovka_canvas()
+
+    def nazhatie_pravoi_knopki(self, event):
+        items = self.canvas.find_overlapping(event.x, event.y, event.x, event.y)
+        for item in items:
+            if self.canvas.type(item) == 'polygon' and item in self.id_map:
+                self.selected_triangle = self.id_map[item]
+                messagebox.showinfo("Выбор", f"Выбран треугольник {self.selected_triangle}")
+                break
+
+    def pererisovka_canvas(self):
+        self.canvas.delete("all")
+        self.id_map = {}
+        for idx, (coords, color) in enumerate(self.triangles):
+            canvas_id = self.canvas.create_polygon(*coords, fill=color, outline="black", width=2)
+            self.id_map[canvas_id] = idx
+        if self.current_triangle:
+            self.canvas.create_polygon(*self.current_triangle, fill=self.current_color, outline="black", width=2)
+
+    def povorot_triangle(self, angle=45):
+        if self.selected_triangle is None:
+            messagebox.showwarning("Нет выбора", "Сначала выберите треугольник правой кнопкой мыши.")
+            return
+
+        coords, color = self.triangles[self.selected_triangle]
+        x1, y1, x2, y2, x3, y3 = coords
+        angle_rad = math.radians(angle)
+
+        def rotate_point(x, y, cx, cy):
+            dx, dy = x - cx, y - cy
+            x_new = cx + dx * math.cos(angle_rad) - dy * math.sin(angle_rad)
+            y_new = cy + dx * math.sin(angle_rad) + dy * math.cos(angle_rad)
+            return x_new, y_new
+
+        cx, cy = x1, y1
+        x2, y2 = rotate_point(x2, y2, cx, cy)
+        x3, y3 = rotate_point(x3, y3, cx, cy)
+
+        new_coords = [x1, y1, x2, y2, x3, y3]
+        self.triangles[self.selected_triangle] = (new_coords, color)
+        self.pererisovka_canvas()
+
+    def vibor_cveta(self):
+        (rgb, hex_color) = colorchooser.askcolor()
+        if hex_color:
+            self.current_color = hex_color  # для новых треугольников
+
+            if self.selected_triangle is not None:
+                coords, _ = self.triangles[self.selected_triangle]
+                self.triangles[self.selected_triangle] = (coords, hex_color)
+                self.pererisovka_canvas()
+
+    def delete_triangle(self):
+        if self.selected_triangle is None:
+            messagebox.showwarning("Нет выбора", "Сначала выберите треугольник правой кнопкой мыши.")
+            return
+
+        del self.triangles[self.selected_triangle]
+        self.selected_triangle = None
+        self.pererisovka_canvas()
+        messagebox.showinfo("Удаление", "Выбранный треугольник удалён.")
+
+    def peresechenie(self):
+        def to_points(coords):
+            return [(coords[0], coords[1]), (coords[2], coords[3]), (coords[4], coords[5])]
+
+        def ccw(A, B, C):
+            return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+
+        def intersect(A, B, C, D):
+            return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
+
+        n = len(self.triangles)
+        for i in range(n):
+            for j in range(i + 1, n):
+                t1 = to_points(self.triangles[i][0])
+                t2 = to_points(self.triangles[j][0])
+                for a in range(3):
+                    for b in range(3):
+                        if intersect(t1[a], t1[(a+1)%3], t2[b], t2[(b+1)%3]):
+                            messagebox.showinfo("Пересечение", f"Треугольник {i} пересекается с {j}")
+                            return
+        messagebox.showinfo("Пересечение", "Пересечений не найдено")
+
+    def delete_canvas(self):
+        self.triangles = []
+        self.canvas.delete("all")
+        self.selected_triangle = None
+
+    def save_triangles(self):
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
+        if file_path:
+            with open(file_path, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["ID", "X1", "Y1", "X2", "Y2", "X3", "Y3", "Color"])
+                for i, (coords, color) in enumerate(self.triangles):
+                    writer.writerow([i, *coords, color])
+            messagebox.showinfo("Сохранено", "Треугольники сохранены успешно!")
+
+    def load_triangles(self):
+        file_path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
+        if file_path:
+            with open(file_path, 'r') as csvfile:
+                reader = csv.reader(csvfile)
+                next(reader)
+                self.triangles = []
+                for row in reader:
+                    coords = list(map(float, row[1:7]))
+                    color = row[7]
+                    self.triangles.append((coords, color))
+            self.pererisovka_canvas()
+            messagebox.showinfo("Загружено", "Треугольники загружены!")
+
+class Interface(tk.Frame):
+    def __init__(self, app):
+        super().__init__(app.master)
+        self.app = app
+        self.initUI()
+
+    def initUI(self):
+        self.pack(fill=tk.X)
+        self.config(background="#A8E4B9")
+
+        button_frame = tk.Frame(self, bg="#A8E4B9")
+        button_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        buttons = [
+            ("Загрузить файл", self.app.load_triangles),
+            ("Выбрать цвет", self.app.vibor_cveta),
+            ("Удалить треугольник", self.app.delete_triangle),
+            ("Повернуть", self.app.povorot_triangle),
+            ("Проверить пересечение", self.app.peresechenie),
+            ("Очистить поле", self.app.delete_canvas),
+            ("Сохранить файл", self.app.save_triangles),
+
+        ]
+
+        total_columns = len(buttons)
+        for col, (text, command) in enumerate(buttons):
+            btn = tk.Button(button_frame, text=text, command=command)
+            btn.grid(row=0, column=col, sticky="ew", padx=4, pady=4)
+
+        for col in range(total_columns):
+            button_frame.grid_columnconfigure(col, weight=1)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.title("Лабораторная работа №8")
+    root.geometry("1200x700")
+
+    app = Triangle(root)
+    interface = Interface(app)
+
+
+    root.mainloop()
