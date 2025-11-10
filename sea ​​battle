@@ -1,0 +1,297 @@
+import tkinter as tk
+import random
+from tkinter import messagebox
+
+GRID_SIZE = 10
+SHIP_SIZES = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1]
+
+
+class SeaBattle:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Морской бой")
+
+        self.center_window(800, 500)
+
+        self.player_board = [[0] * GRID_SIZE for _ in range(GRID_SIZE)]
+        self.enemy_board = [[0] * GRID_SIZE for _ in range(GRID_SIZE)]
+
+        self.player_buttons = []
+        self.enemy_buttons = []
+
+        self.current_ship_size_index = 0
+        self.placing_phase = True
+        self.direction = "H"
+        self.hover_cells = []
+
+        self.bot_hits = []
+        self.bot_targets = []
+        self.bot_direction = None
+        self.bot_tried = set()
+
+        main_frame = tk.Frame(root)
+        main_frame.pack(expand=True)
+        main_frame.place(relx=0.5, rely=0.45, anchor="center")
+
+        self.create_boards(main_frame)
+        self.place_enemy_ships()
+
+        self.info_label = tk.Label(root, text="Расставьте корабли (Пробел — поворот)")
+        self.info_label.pack(pady=10)
+
+        self.root.bind("<space>", self.toggle_direction)
+
+    def center_window(self, width, height):
+        self.root.update_idletasks()
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        x, y = (sw - width) // 2, (sh - height) // 2
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def create_boards(self, parent):
+        frame1 = tk.Frame(parent)
+        frame1.grid(row=0, column=0, padx=30, pady=10)
+        frame2 = tk.Frame(parent)
+        frame2.grid(row=0, column=1, padx=30, pady=10)
+
+        tk.Label(frame1, text="Ваше поле").grid(row=0, column=0, columnspan=GRID_SIZE)
+        tk.Label(frame2, text="Поле противника").grid(row=0, column=0, columnspan=GRID_SIZE)
+
+        for i in range(GRID_SIZE):
+            row_p, row_e = [], []
+            for j in range(GRID_SIZE):
+                bp = tk.Button(frame1, width=2, height=1,
+                               command=lambda x=i, y=j: self.place_ship(x, y))
+                bp.grid(row=i + 1, column=j)
+                bp.bind("<Enter>", lambda e, x=i, y=j: self.on_hover(x, y))
+                bp.bind("<Leave>", lambda e: self.clear_hover())
+                row_p.append(bp)
+
+                be = tk.Button(frame2, width=2, height=1,
+                               command=lambda x=i, y=j: self.shoot(x, y))
+                be.grid(row=i + 1, column=j)
+                row_e.append(be)
+            self.player_buttons.append(row_p)
+            self.enemy_buttons.append(row_e)
+
+    def toggle_direction(self, event):
+        if not self.placing_phase:
+            return
+        self.direction = "V" if self.direction == "H" else "H"
+        self.info_label.config(
+            text=f"Ориентация: {'Вертикально' if self.direction == 'V' else 'Горизонтально'}"
+        )
+
+    def on_hover(self, x, y):
+        if not self.placing_phase or self.current_ship_size_index >= len(SHIP_SIZES):
+            return
+        self.clear_hover()
+        size = SHIP_SIZES[self.current_ship_size_index]
+        if not self.can_place_ship(x, y, size, self.player_board):
+            return
+
+        dx, dy = (1, 0) if self.direction == "V" else (0, 1)
+        for i in range(size):
+            nx, ny = x + dx * i, y + dy * i
+            if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE:
+                self.player_buttons[nx][ny].config(bg="lightgreen")
+                self.hover_cells.append((nx, ny))
+
+    def clear_hover(self):
+        for (x, y) in self.hover_cells:
+            if self.player_board[x][y] == 0:
+                self.player_buttons[x][y].config(bg="SystemButtonFace")
+        self.hover_cells = []
+
+    def can_place_ship(self, x, y, size, board, direction=None):
+        if direction is None:
+            direction = self.direction
+        dx, dy = (1, 0) if direction == "V" else (0, 1)
+        for i in range(size):
+            nx, ny = x + dx * i, y + dy * i
+            if nx >= GRID_SIZE or ny >= GRID_SIZE or board[nx][ny] != 0:
+                return False
+            for a in range(-1, 2):
+                for b in range(-1, 2):
+                    cx, cy = nx + a, ny + b
+                    if 0 <= cx < GRID_SIZE and 0 <= cy < GRID_SIZE and board[cx][cy] == 1:
+                        return False
+        return True
+
+    def place_ship(self, x, y):
+        if not self.placing_phase or self.current_ship_size_index >= len(SHIP_SIZES):
+            return
+        size = SHIP_SIZES[self.current_ship_size_index]
+        if not self.can_place_ship(x, y, size, self.player_board):
+            self.info_label.config(text="Нельзя разместить здесь!")
+            return
+        dx, dy = (1, 0) if self.direction == "V" else (0, 1)
+        for i in range(size):
+            nx, ny = x + dx * i, y + dy * i
+            self.player_board[nx][ny] = 1
+            self.player_buttons[nx][ny].config(bg="gray")
+        self.current_ship_size_index += 1
+        self.clear_hover()
+        if self.current_ship_size_index == len(SHIP_SIZES):
+            self.placing_phase = False
+            self.info_label.config(text="Все корабли расставлены! Начните бой.")
+        else:
+            self.info_label.config(
+                text=f"Разместите корабль длиной {SHIP_SIZES[self.current_ship_size_index]}"
+            )
+
+    def place_enemy_ships(self):
+        def can_place(x, y, size, d):
+            dx, dy = (1, 0) if d == "V" else (0, 1)
+            for i in range(size):
+                nx, ny = x + dx * i, y + dy * i
+                if nx >= GRID_SIZE or ny >= GRID_SIZE or self.enemy_board[nx][ny] != 0:
+                    return False
+                for a in range(-1, 2):
+                    for b in range(-1, 2):
+                        cx, cy = nx + a, ny + b
+                        if 0 <= cx < GRID_SIZE and 0 <= cy < GRID_SIZE and self.enemy_board[cx][cy] == 1:
+                            return False
+            return True
+
+        for size in SHIP_SIZES:
+            placed = False
+            while not placed:
+                x, y = random.randint(0, 9), random.randint(0, 9)
+                d = random.choice(["H", "V"])
+                if can_place(x, y, size, d):
+                    dx, dy = (1, 0) if d == "V" else (0, 1)
+                    for i in range(size):
+                        self.enemy_board[x + dx * i][y + dy * i] = 1
+                    placed = True
+
+    def shoot(self, x, y):
+        if self.placing_phase:
+            self.info_label.config(text="Сначала расставьте корабли!")
+            return
+        btn = self.enemy_buttons[x][y]
+        if btn["state"] == "disabled":
+            return
+        btn["state"] = "disabled"
+
+        if self.enemy_board[x][y] == 1:
+            btn.config(bg="red")
+            self.enemy_board[x][y] = 2
+            if self.is_ship_destroyed(x, y, self.enemy_board):
+                self.mark_destroyed_area(x, y, self.enemy_board, self.enemy_buttons)
+            if self.check_win(self.enemy_board):
+                messagebox.showinfo("Победа!", "Вы победили!")
+                self.root.destroy()
+        else:
+            btn.config(bg="blue")
+            self.enemy_turn()
+
+    def enemy_turn(self):
+        tx, ty = self.hardcore_target()
+        if tx is None:
+            return
+
+        self.bot_tried.add((tx, ty))
+        if self.player_board[tx][ty] == 1:
+            self.player_buttons[tx][ty].config(bg="red")
+            self.player_board[tx][ty] = 2
+            self.bot_hits.append((tx, ty))
+            self.update_direction()
+            self.add_adjacent_targets(tx, ty)
+
+            if self.is_ship_destroyed(tx, ty, self.player_board):
+                self.mark_destroyed_area(tx, ty, self.player_board, self.player_buttons)
+                self.bot_hits.clear()
+                self.bot_targets.clear()
+                self.bot_direction = None
+
+            if self.check_win(self.player_board):
+                messagebox.showinfo("Поражение!", "Компьютер победил!")
+                self.root.destroy()
+        else:
+            self.player_buttons[tx][ty].config(bg="blue")
+            self.player_board[tx][ty] = -1
+
+    def update_direction(self):
+        if len(self.bot_hits) < 2:
+            return
+        x1, y1 = self.bot_hits[0]
+        x2, y2 = self.bot_hits[1]
+        if x1 == x2:
+            self.bot_direction = "H"
+        elif y1 == y2:
+            self.bot_direction = "V"
+
+    def add_adjacent_targets(self, x, y):
+        dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        if self.bot_direction == "H":
+            dirs = [(0, 1), (0, -1)]
+        elif self.bot_direction == "V":
+            dirs = [(1, 0), (-1, 0)]
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE and (nx, ny) not in self.bot_tried:
+                if self.player_board[nx][ny] in [0, 1]:
+                    if (nx, ny) not in self.bot_targets:
+                        self.bot_targets.insert(0, (nx, ny))
+
+    def hardcore_target(self):
+        if self.bot_targets:
+            return self.bot_targets.pop(0)
+
+        pattern = [(i, j) for i in range(GRID_SIZE) for j in range(GRID_SIZE)
+                   if (i + j) % 2 == 0 and (i, j) not in self.bot_tried and self.player_board[i][j] in [0, 1]]
+
+        if not pattern:
+            pattern = [(i, j) for i in range(GRID_SIZE) for j in range(GRID_SIZE)
+                       if (i, j) not in self.bot_tried and self.player_board[i][j] in [0, 1]]
+
+        if not pattern:
+            return None, None
+
+        weighted = sorted(pattern, key=lambda c: abs(c[0] - 5) + abs(c[1] - 5))
+        return weighted[0]
+
+    def is_ship_destroyed(self, x, y, board):
+        visited, cells = set(), []
+        def dfs(i, j):
+            if (i, j) in visited:
+                return
+            visited.add((i, j))
+            if 0 <= i < GRID_SIZE and 0 <= j < GRID_SIZE and board[i][j] == 2:
+                cells.append((i, j))
+                for a, b in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                    dfs(i + a, j + b)
+        dfs(x, y)
+        for cx, cy in cells:
+            for a, b in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                nx, ny = cx + a, cy + b
+                if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE and board[nx][ny] == 1:
+                    return False
+        return True
+
+    def mark_destroyed_area(self, x, y, board, buttons):
+        visited, cells = set(), []
+        def dfs(i, j):
+            if (i, j) in visited:
+                return
+            visited.add((i, j))
+            if 0 <= i < GRID_SIZE and 0 <= j < GRID_SIZE and board[i][j] == 2:
+                cells.append((i, j))
+                for a, b in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                    dfs(i + a, j + b)
+        dfs(x, y)
+        for cx, cy in cells:
+            for a in range(-1, 2):
+                for b in range(-1, 2):
+                    nx, ny = cx + a, cy + b
+                    if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE and board[nx][ny] == 0:
+                        board[nx][ny] = -1
+                        buttons[nx][ny].config(bg="blue", state="disabled")
+
+    def check_win(self, board):
+        return all(1 not in row for row in board)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    game = SeaBattle(root)
+    root.mainloop()
