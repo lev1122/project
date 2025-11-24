@@ -1,0 +1,102 @@
+import tkinter as tk
+from tkinter import filedialog, messagebox
+
+def center_window(win):
+    win.update_idletasks()
+    width = win.winfo_width()
+    height = win.winfo_height()
+    x = (win.winfo_screenwidth() // 2) - (width // 2)
+    y = (win.winfo_screenheight() // 2) - (height // 2)
+    win.geometry(f"{width}x{height}+{x}+{y}")
+
+def read_matrix(filename):
+    with open(filename, 'r') as f:
+        return [[int(x) for x in line.split()] for line in f]
+
+def find_path(matrix, start, end):
+    r, c = len(matrix), len(matrix[0])
+    visited = [[False]*c for _ in range(r)]
+    path = []
+
+    def dfs(x, y):
+        if not (0 <= x < r and 0 <= y < c): return False
+        if matrix[x][y] == 1 or visited[x][y]: return False
+        visited[x][y] = True
+        path.append((x, y))
+        if (x, y) == end: return True
+        for dx, dy in [(1,0),(-1,0),(0,1),(0,-1)]:
+            if dfs(x+dx, y+dy): return True
+        path.pop()
+        return False
+    return path if dfs(*start) else None
+
+def visualize(matrix, path, start, end):
+    win = tk.Toplevel()
+    win.title("Лабиринт")
+    cell = 28
+    rows, cols = len(matrix), len(matrix[0])
+    cv = tk.Canvas(win, width=cols * cell, height=rows * cell, bg="white")
+    cv.pack(padx=10, pady=10)
+
+    for i in range(rows):
+        for j in range(cols):
+            x1, y1 = j * cell, i * cell
+            x2, y2 = x1 + cell, y1 + cell
+            color = "#333" if matrix[i][j] == 1 else "white"
+            cv.create_rectangle(x1, y1, x2, y2, fill=color, outline="#bbb")
+    si, sj = start
+    cv.create_rectangle(sj*cell+4, si*cell+4, sj*cell+cell-4, si*cell+cell-4, fill="green", outline="")
+    ei, ej = end
+    cv.create_rectangle(ej*cell+4, ei*cell+4, ej*cell+cell-4, ei*cell+cell-4, fill="red", outline="")
+
+    def draw_step(k=0):
+        if k >= len(path):
+            tk.Label(win, text=f"Длина пути: {len(path)}").pack(pady=5)
+            return
+        i, j = path[k]
+        if (i, j) != start and (i, j) != end:
+            cv.create_rectangle(j*cell+4, i*cell+4, j*cell+cell-4, i*cell+cell-4,
+                                fill="blue", outline="")
+        win.after(100, draw_step, k+1)  # через 100 мс следующий шаг
+    draw_step()  # запуск анимации
+    center_window(win)
+
+def select_file():
+    fname = filedialog.askopenfilename(filetypes=[("Text","*.txt")])
+    if fname:
+        file_label.config(text=f"Файл: {fname.split('/')[-1]}")
+        solve(fname)
+
+def solve(fname):
+    try:
+        matrix = read_matrix(fname)
+        if any(len(row)!=15 for row in matrix) or len(matrix)!=15:
+            return messagebox.showerror("Ошибка", "Матрица должна быть 15x15")
+        s, e = (0,0), (14,14)
+        if matrix[s[0]][s[1]] or matrix[e[0]][e[1]]:
+            return messagebox.showerror("Ошибка", "Старт или финиш заблокирован")
+        path = find_path(matrix, s, e)
+        messagebox.showinfo("Результат", f"Путь найден!" if path else "Путь не найден")
+        visualize(matrix, path or [], s, e)
+    except Exception as ex:
+        messagebox.showerror("Ошибка", str(ex))
+
+def main():
+    global file_label
+    root = tk.Tk()
+    root.title("Прохождение лабиринта")
+    root.geometry("420x240")
+    root.configure(bg="#e5e5e5")
+    tk.Label(root, text="Прохождение лабиринта", font=("Arial",16,"bold"), bg="#e5e5e5").pack(pady=8)
+    tk.Label(root, text="Выберите файл матрицы 15x15", bg="#e5e5e5").pack(pady=4)
+    tk.Button(root, text="Выбрать файл", command=select_file,
+              bg="#1c6dd0", fg="white", padx=20, pady=6).pack(pady=10)
+    file_label = tk.Label(root, text="Файл не выбран", bg="#e5e5e5")
+    file_label.pack(pady=5)
+    tk.Button(root, text="Выход", command=root.quit,
+              bg="#d94141", fg="white", padx=15, pady=5).pack(pady=10)
+    center_window(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
