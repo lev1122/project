@@ -1,0 +1,698 @@
+import tkinter as tk
+from tkinter import messagebox
+import hashlib
+import os
+
+BOARD_SIZE = 8
+CELL_SIZE = 80
+MARGIN = 30
+WINDOW_WIDTH = 8 * CELL_SIZE + 2 * MARGIN + 40
+WINDOW_HEIGHT = 8 * CELL_SIZE + 2 * MARGIN + 180
+
+EMPTY = 0
+WHITE = 1
+BLACK = 2
+WHITE_KING = 3
+BLACK_KING = 4
+
+USER_DB_FILE = "users.txt"
+
+
+def encrypt_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def decrypt_password(encrypted):
+    return encrypted
+
+
+def load_users():
+    if not os.path.exists(USER_DB_FILE):
+        return {}
+    users = {}
+    try:
+        with open(USER_DB_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and ':' in line:
+                    login, password_hash = line.split(':', 1)
+                    users[login] = password_hash
+    except Exception as e:
+        print(f"Ошибка загрузки базы данных: {e}")
+    return users
+
+
+def save_user(login, password_hash):
+    try:
+        with open(USER_DB_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"{login}:{password_hash}\n")
+        return True
+    except Exception as e:
+        print(f"Ошибка сохранения пользователя: {e}")
+        return False
+
+def user_exists(login):
+    users = load_users()
+    return login in users
+
+def verify_user(login, password):
+    users = load_users()
+    if login not in users:
+        return False
+    password_hash = encrypt_password(password)
+    return users[login] == password_hash
+
+def validate_credentials(login, password):
+    if len(login) < 2:
+        messagebox.showerror("Ошибка", "Логин должен содержать минимум 2 символа!")
+        return False
+    if len(password) < 2:
+        messagebox.showerror("Ошибка", "Пароль должен содержать минимум 2 символа!")
+        return False
+    if not login.strip():
+        messagebox.showerror("Ошибка", "Логин не может быть пустым!")
+        return False
+    if not password.strip():
+        messagebox.showerror("Ошибка", "Пароль не может быть пустым!")
+        return False
+    return True
+
+
+class GameEngine:
+
+    def __init__(self):
+        self.board = [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
+        self.turn = WHITE
+        self.half_moves = 0
+        self.must_capture_second = False
+        self.first_move_pos = None
+        self.init_board()
+
+    def init_board(self):
+        #Инициализация начальной позиции
+        for y in range(BOARD_SIZE):
+            for x in range(BOARD_SIZE):
+                if (x + y) % 2 == 0:
+                    if y < 3:
+                        self.board[y][x] = BLACK
+                    elif y > 4:
+                        self.board[y][x] = WHITE
+                else:
+                    if y < 3:
+                        self.board[y][x] = BLACK
+                    elif y > 4:
+                        self.board[y][x] = WHITE
+
+    def is_move_valid(self, x, y):
+        #Алгоритм проверки доступности хода
+        if not (0 <= x < 8 and 0 <= y < 8):
+            return False
+        if self.board[y][x] != EMPTY:
+            return False
+        return True
+
+    def get_moves(self, x, y):
+        #Алгоритм проверки возможности хода
+        piece = self.board[y][x]
+
+        if self.must_capture_second:
+            return self.get_captures(x, y, piece)
+
+        captures = self.get_captures(x, y, piece)
+        moves = []
+        if piece in (WHITE, BLACK):
+            directions = [(-1, -1), (1, -1)] if piece == WHITE else [(-1, 1), (1, 1)]
+            for dx, dy in directions:
+                nx, ny = x + dx, y + dy
+                if self.is_move_valid(nx, ny):
+                    moves.append((nx, ny))
+        else:
+            for dx, dy in [(-1, -1), (1, -1), (-1, 1), (1, 1)]:
+                nx, ny = x + dx, y + dy
+                while self.is_move_valid(nx, ny):
+                    moves.append((nx, ny))
+                    nx += dx
+                    ny += dy
+
+        return captures + moves
+
+    def get_captures(self, x, y, piece):
+        #Получение возможных взятий
+        captures = []
+        enemy = (BLACK, BLACK_KING) if piece in (WHITE, WHITE_KING) else (WHITE, WHITE_KING)
+        if piece in (WHITE, BLACK):
+            for dx, dy in [(-1, -1), (1, -1), (-1, 1), (1, 1)]:
+                nx, ny = x + dx, y + dy
+                jx, jy = x + 2 * dx, y + 2 * dy
+                if 0 <= nx < 8 and 0 <= ny < 8 and 0 <= jx < 8 and 0 <= jy < 8:
+                    if self.board[ny][nx] in enemy and self.board[jy][jx] == EMPTY:
+                        captures.append((jx, jy))
+        else:
+            for dx, dy in [(-1, -1), (1, -1), (-1, 1), (1, 1)]:
+                nx, ny = x + dx, y + dy
+                while 0 <= nx < 8 and 0 <= ny < 8:
+                    if self.board[ny][nx] == EMPTY:
+                        nx += dx
+                        ny += dy
+                        continue
+                    if self.board[ny][nx] in enemy:
+                        jx, jy = nx + dx, ny + dy
+                        while 0 <= jx < 8 and 0 <= jy < 8 and self.board[jy][jx] == EMPTY:
+                            captures.append((jx, jy))
+                            jx += dx
+                            jy += dy
+                        break
+                    else:
+                        break
+        return captures
+
+    def check_threat_created(self, move_to_pos):
+        #Алгоритм проверки создания угрозы
+        x, y = move_to_pos
+        piece = self.board[y][x]
+        captures = self.get_captures(x, y, piece)
+        return len(captures) > 0
+
+    def make_move(self, src, dst):
+        #Выполнение хода
+        sx, sy = src
+        dx, dy = dst
+        piece = self.board[sy][sx]
+
+        dx_dir = 1 if dx > sx else -1
+        dy_dir = 1 if dy > sy else -1
+
+        if piece in (WHITE_KING, BLACK_KING):
+            x, y = sx + dx_dir, sy + dy_dir
+            while (x, y) != (dx, dy):
+                if self.board[y][x] in (WHITE, BLACK, WHITE_KING, BLACK_KING) and self.board[y][x] != piece:
+                    self.board[y][x] = EMPTY
+                    break
+                x += dx_dir
+                y += dy_dir
+        else:
+            if abs(dx - sx) == 2:
+                mx, my = (sx + dx) // 2, (sy + dy) // 2
+                self.board[my][mx] = EMPTY
+
+        self.board[dy][dx] = piece
+        self.board[sy][sx] = EMPTY
+        self.promote(dx, dy)
+
+    def promote(self, x, y):
+        #Превращение в дамку
+        if y == 0 and self.board[y][x] == WHITE:
+            self.board[y][x] = WHITE_KING
+        if y == 7 and self.board[y][x] == BLACK:
+            self.board[y][x] = BLACK_KING
+
+    def evaluate_position(self):
+        #Оценочный алгоритм - оценка позиции на доске
+        white_score = 0
+        black_score = 0
+
+        for y in range(8):
+            for x in range(8):
+                piece = self.board[y][x]
+                if piece == WHITE:
+                    white_score += 1
+                elif piece == BLACK:
+                    black_score += 1
+                elif piece == WHITE_KING:
+                    white_score += 3
+                elif piece == BLACK_KING:
+                    black_score += 3
+
+        return white_score - black_score
+
+    def check_game_over(self):
+        #Алгоритм проверки конца игры
+        white_exists = any(self.board[y][x] in (WHITE, WHITE_KING) for y in range(8) for x in range(8))
+        black_exists = any(self.board[y][x] in (BLACK, BLACK_KING) for y in range(8) for x in range(8))
+
+        if not white_exists:
+            return "black_win"
+        if not black_exists:
+            return "white_win"
+
+        current = (WHITE, WHITE_KING) if self.turn == WHITE else (BLACK, BLACK_KING)
+        has_moves = False
+        for y in range(8):
+            for x in range(8):
+                if self.board[y][x] in current:
+                    if self.get_moves(x, y):
+                        has_moves = True
+                        break
+            if has_moves:
+                break
+
+        if not has_moves:
+            return "blocked"
+
+        white_colors = set()
+        black_colors = set()
+        for y in range(8):
+            for x in range(8):
+                if self.board[y][x] in (WHITE, WHITE_KING):
+                    white_colors.add((x + y) % 2)
+                elif self.board[y][x] in (BLACK, BLACK_KING):
+                    black_colors.add((x + y) % 2)
+        if white_colors.isdisjoint(black_colors):
+            return "draw"
+
+        return None
+
+
+class GameBoard:
+
+    def __init__(self, root, player_names):
+        self.root = root
+        self.root.title("Шашки Вигмана")
+        self.center_window(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_window_close)
+
+        self.player_names = player_names
+        self.engine = GameEngine()
+        self.selected = None
+        self.possible_moves = []
+
+        self.setup_ui()
+        self.update_info()
+        self.draw()
+
+    def setup_ui(self):
+        #Настройка интерфейса
+        top_frame = tk.Frame(self.root, bg="#2c3e50", height=60)
+        top_frame.pack(side="top", fill="x")
+        top_frame.pack_propagate(False)
+
+        self.turn_label = tk.Label(top_frame, text="", font=("Arial", 18, "bold"),
+                                   bg="#2c3e50", fg="white")
+        self.turn_label.pack(expand=True)
+
+        self.canvas = tk.Canvas(self.root, width=BOARD_SIZE * CELL_SIZE + 2 * MARGIN,
+                                height=BOARD_SIZE * CELL_SIZE + 2 * MARGIN, bg="#34495e")
+        self.canvas.pack(pady=5)
+        self.canvas.bind("<Button-1>", self.on_click)
+
+        bottom_frame = tk.Frame(self.root)
+        bottom_frame.pack(side="bottom", fill="x", pady=5)
+
+        surrender_btn = tk.Button(bottom_frame, text="Сдаться", font=("Arial", 14),
+                                  command=self.surrender)
+        surrender_btn.pack(side="top", pady=5)
+
+        self.info = tk.StringVar()
+        info_label = tk.Label(bottom_frame, textvariable=self.info, font=("Arial", 12))
+        info_label.pack(side="top", pady=5)
+
+    def center_window(self, width, height):
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        x = (screen_width // 2) - (width // 2)
+        y = (screen_height // 2) - (height // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def update_info(self):
+        player_name = self.player_names[0] if self.engine.turn == WHITE else self.player_names[1]
+        color = "БЕЛЫЕ" if self.engine.turn == WHITE else "ЧЁРНЫЕ"
+        self.turn_label.config(text=f"Ход: {player_name} ({color})")
+
+        if self.engine.must_capture_second:
+            self.info.set("⚠ Обязательное взятие! Вы создали угрозу первым полуходом.")
+        else:
+            half_move_text = f"Полуход {self.engine.half_moves + 1}/2" if self.engine.half_moves > 0 else ""
+            self.info.set(half_move_text)
+
+    def draw(self):
+        self.canvas.delete("all")
+
+        # Рисуем координаты (буквы A-H сверху и снизу)
+        letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+        for i, letter in enumerate(letters):
+            x = MARGIN + i * CELL_SIZE + CELL_SIZE // 2
+            # Сверху
+            self.canvas.create_text(x, MARGIN // 2, text=letter,
+                                    font=("Arial", 14, "bold"), fill="white")
+            # Снизу
+            self.canvas.create_text(x, MARGIN + BOARD_SIZE * CELL_SIZE + MARGIN // 2,
+                                    text=letter, font=("Arial", 14, "bold"), fill="white")
+
+        # Рисуем координаты (цифры 8-1 слева и справа)
+        for i in range(8):
+            y = MARGIN + i * CELL_SIZE + CELL_SIZE // 2
+            number = str(8 - i)
+            # Слева
+            self.canvas.create_text(MARGIN // 2, y, text=number,
+                                    font=("Arial", 14, "bold"), fill="white")
+            # Справа
+            self.canvas.create_text(MARGIN + BOARD_SIZE * CELL_SIZE + MARGIN // 2, y,
+                                    text=number, font=("Arial", 14, "bold"), fill="white")
+
+        # Рисуем клетки доски
+        for y in range(BOARD_SIZE):
+            for x in range(BOARD_SIZE):
+                color = "#b58863" if (x + y) % 2 == 0 else "#f0d9b5"
+                self.canvas.create_rectangle(
+                    MARGIN + x * CELL_SIZE, MARGIN + y * CELL_SIZE,
+                    MARGIN + (x + 1) * CELL_SIZE, MARGIN + (y + 1) * CELL_SIZE,
+                    fill=color
+                )
+
+                if (x, y) in self.possible_moves:
+                    self.canvas.create_rectangle(
+                        MARGIN + x * CELL_SIZE + 4, MARGIN + y * CELL_SIZE + 4,
+                        MARGIN + (x + 1) * CELL_SIZE - 4, MARGIN + (y + 1) * CELL_SIZE - 4,
+                        outline="green", width=3
+                    )
+
+                piece = self.engine.board[y][x]
+                if piece != EMPTY:
+                    self.draw_piece(x, y, piece)
+
+        if self.selected:
+            x, y = self.selected
+            self.canvas.create_rectangle(
+                MARGIN + x * CELL_SIZE, MARGIN + y * CELL_SIZE,
+                MARGIN + (x + 1) * CELL_SIZE, MARGIN + (y + 1) * CELL_SIZE,
+                outline="blue", width=3
+            )
+
+    def draw_piece(self, x, y, piece):
+        cx = MARGIN + x * CELL_SIZE + CELL_SIZE // 2
+        cy = MARGIN + y * CELL_SIZE + CELL_SIZE // 2
+        r = CELL_SIZE // 2 - 8
+        color = "white" if piece in (WHITE, WHITE_KING) else "black"
+        self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill=color)
+        if piece in (WHITE_KING, BLACK_KING):
+            self.canvas.create_text(cx, cy, text="Д", fill="red",
+                                    font=("Arial", 18, "bold"))
+
+    def on_click(self, event):
+        # Корректируем координаты клика с учетом отступа
+        x = (event.x - MARGIN) // CELL_SIZE
+        y = (event.y - MARGIN) // CELL_SIZE
+        if not (0 <= x < 8 and 0 <= y < 8):
+            return
+
+        current = (WHITE, WHITE_KING) if self.engine.turn == WHITE else (BLACK, BLACK_KING)
+
+        if self.selected:
+            if (x, y) in self.possible_moves:
+                self.engine.make_move(self.selected, (x, y))
+
+                if self.engine.half_moves == 0:
+                    self.engine.first_move_pos = (x, y)
+                    if self.engine.check_threat_created((x, y)):
+                        self.engine.must_capture_second = True
+                    else:
+                        self.engine.must_capture_second = False
+                else:
+                    self.engine.must_capture_second = False
+
+                self.engine.half_moves += 1
+                self.selected = None
+                self.possible_moves = []
+
+                if self.engine.half_moves == 2:
+                    self.end_turn()
+            else:
+                self.selected = None
+                self.possible_moves = []
+
+        else:
+            if self.engine.board[y][x] in current:
+                if self.engine.must_capture_second:
+                    if (x, y) != self.engine.first_move_pos:
+                        return
+
+                self.selected = (x, y)
+                self.possible_moves = self.engine.get_moves(x, y)
+
+        self.update_info()
+        self.draw()
+
+    def end_turn(self):
+        self.engine.half_moves = 0
+        self.engine.turn = BLACK if self.engine.turn == WHITE else WHITE
+        self.engine.must_capture_second = False
+        self.engine.first_move_pos = None
+        self.selected = None
+        self.possible_moves = []
+        self.update_info()
+        self.check_game_over()
+
+    def check_game_over(self):
+        result = self.engine.check_game_over()
+        if result == "white_win":
+            self.finish_game(f"{self.player_names[0]} победил")
+        elif result == "black_win":
+            self.finish_game(f"{self.player_names[1]} победил")
+        elif result == "blocked":
+            winner = self.player_names[1] if self.engine.turn == WHITE else self.player_names[0]
+            loser = self.player_names[0] if self.engine.turn == WHITE else self.player_names[1]
+            self.finish_game(f"{winner} победил - у {loser} нет доступных ходов")
+        elif result == "draw":
+            self.finish_game("Ничья: фигуры не могут взаимодействовать")
+
+    def surrender(self):
+        surrendered = self.player_names[0] if self.engine.turn == WHITE else self.player_names[1]
+        winner = self.player_names[1] if self.engine.turn == WHITE else self.player_names[0]
+        self.finish_game(f"{surrendered} сдался. Победил {winner}")
+
+    def finish_game(self, message):
+        self.canvas.unbind("<Button-1>")
+        messagebox.showinfo("Игра окончена", message)
+        try:
+            self.root.destroy()
+        except:
+            pass
+        show_start_window()
+
+    def on_window_close(self):
+        try:
+            self.root.destroy()
+        except:
+            pass
+        import sys
+        sys.exit(0)
+
+
+# ФУНКЦИИ ДЛЯ ОКОН
+def show_rules_window():
+    #Окно с правилами игры
+    rules_root = tk.Tk()
+    rules_root.title("Правила игры")
+    center_window(rules_root, 700, 600)
+
+    tk.Label(rules_root, text="Правила игры", font=("Arial", 20, "bold")).pack(pady=15)
+
+    # Создаем фрейм с прокруткой для правил
+    frame = tk.Frame(rules_root)
+    frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+    # Текст правил
+    rules_text = """Игра придерживается правил шашек Вигмана.
+
+1. Игра проводится на доске размера 8x8.
+
+2. Игра начинается за белых. Ход выполняется двойной. То есть игрок в свою 
+очередь делает два хода (далее будем говорить о полуходах). Он может оба 
+полухода потратить и на белопольную партию и на чернопольную. Можно сделать 
+оба полухода тихими, можно оба ударными, можно один тихий и один ударный. 
+Все перечисленные сочетания равноправны.
+
+3. Игрок может передвигать только свои фигуры.
+
+4. В начале игры у каждого по 24 шашки. Дамка ходит по диагонали на любое 
+количество клеток.
+
+5. Пешка двигается по диагонали вперёд (или в любую сторону при взятии). 
+Если достигнуть последнюю противоположную вашим шашкам горизонталь, то та 
+шашка, которая на ней, становиться дамкой.
+
+6. Если есть бой, то он не обязателен, точнее двойной ход имеет приоритет, 
+в том смысле, что выбор первого полухода всегда за игроком, но если его 
+первый полуход создает угрозу для шашки противника, то вторым полуходом 
+он обязан рубить.
+
+7. Выигрывает тот, кто избавится от всех фигур соперника, лишит его 
+возможности хода, либо вынудит признать поражение."""
+
+    text_widget = tk.Text(frame, font=("Arial", 11), wrap="word",
+                          bg="#f5f5f5", relief="solid", borderwidth=1)
+    text_widget.insert("1.0", rules_text)
+    text_widget.config(state="disabled")  # Только для чтения
+    text_widget.pack(fill="both", expand=True)
+
+    tk.Button(rules_root, text="Закрыть", font=("Arial", 14), width=15,
+              command=rules_root.destroy).pack(pady=15)
+
+    rules_root.mainloop()
+
+
+def show_start_window():
+    #Стартовое окно
+    root = tk.Tk()
+    root.title("Шашки Вигмана")
+    center_window(root, 500, 450)
+    root.protocol("WM_DELETE_WINDOW", lambda: on_closing(root))
+
+    tk.Label(root, text="Шашки Вигмана", font=("Arial", 24, "bold")).pack(pady=30)
+    tk.Button(root, text="Играть", font=("Arial", 16), width=20,
+              command=lambda: start_auth_flow(root)).pack(pady=10)
+    tk.Button(root, text="Правила", font=("Arial", 16), width=20,
+              command=show_rules_window).pack(pady=10)
+    tk.Button(root, text="Выйти", font=("Arial", 16), width=20,
+              command=lambda: on_closing(root)).pack(pady=10)
+
+    root.mainloop()
+
+
+def start_auth_flow(start_root):
+    #Запуск процесса авторизации
+    start_root.destroy()
+    show_auth_window(1, None)
+
+
+def show_auth_window(player_num, player1_name=None):
+    #Окно авторизации
+    root = tk.Tk()
+    root.title(f"Авторизация - Игрок {player_num}")
+    center_window(root, 400, 350)
+    root.protocol("WM_DELETE_WINDOW", lambda: on_closing(root))
+
+    tk.Label(root, text=f"Вход - Игрок {player_num}", font=("Arial", 20, "bold")).pack(pady=20)
+
+    tk.Label(root, text="Логин:", font=("Arial", 12)).pack(pady=5)
+    login_entry = tk.Entry(root, font=("Arial", 12), width=25)
+    login_entry.pack(pady=5)
+
+    tk.Label(root, text="Пароль:", font=("Arial", 12)).pack(pady=5)
+    password_entry = tk.Entry(root, font=("Arial", 12), width=25, show="*")
+    password_entry.pack(pady=5)
+
+    btn_frame = tk.Frame(root)
+    btn_frame.pack(pady=20)
+
+    def do_login():
+        login = login_entry.get().strip()
+        password = password_entry.get()
+
+        if not validate_credentials(login, password):
+            return
+
+        if verify_user(login, password):
+            if player_num == 1:
+                messagebox.showinfo("Успех", f"Игрок 1 (белые): {login}\n\nТеперь авторизуйтесь как Игрок 2")
+                root.destroy()
+                show_auth_window(2, login)
+            else:
+                if player1_name == login:
+                    messagebox.showwarning("Внимание", "Оба игрока используют один логин!")
+                messagebox.showinfo("Успех", f"Игрок 2 (чёрные): {login}\n\nИгра начинается!")
+                root.destroy()
+                game_root = tk.Tk()
+                GameBoard(game_root, [player1_name, login])
+                game_root.mainloop()
+        else:
+            messagebox.showerror("Ошибка", "Неверный логин или пароль!")
+
+    def show_reg():
+        root.destroy()
+        show_register_window(player_num, player1_name)
+
+    def go_back():
+        root.destroy()
+        if player_num == 1:
+            show_start_window()
+        else:
+            show_auth_window(1, None)
+
+    tk.Button(btn_frame, text="Войти", font=("Arial", 12), width=12,
+              command=do_login).pack(side="left", padx=5)
+    tk.Button(btn_frame, text="Регистрация", font=("Arial", 12), width=12,
+              command=show_reg).pack(side="left", padx=5)
+
+    tk.Button(root, text="Назад", font=("Arial", 10),
+              command=go_back).pack(pady=10)
+
+    root.mainloop()
+
+
+def show_register_window(player_num, player1_name=None):
+    #Окно регистрации
+    root = tk.Tk()
+    root.title("Регистрация")
+    center_window(root, 400, 400)
+    root.protocol("WM_DELETE_WINDOW", lambda: on_closing(root))
+
+    tk.Label(root, text="Регистрация", font=("Arial", 20, "bold")).pack(pady=20)
+
+    tk.Label(root, text="Логин:", font=("Arial", 12)).pack(pady=5)
+    login_entry = tk.Entry(root, font=("Arial", 12), width=25)
+    login_entry.pack(pady=5)
+
+    tk.Label(root, text="Пароль:", font=("Arial", 12)).pack(pady=5)
+    password_entry = tk.Entry(root, font=("Arial", 12), width=25, show="*")
+    password_entry.pack(pady=5)
+
+    tk.Label(root, text="Подтвердите пароль:", font=("Arial", 12)).pack(pady=5)
+    confirm_entry = tk.Entry(root, font=("Arial", 12), width=25, show="*")
+    confirm_entry.pack(pady=5)
+
+    def do_register():
+        login = login_entry.get().strip()
+        password = password_entry.get()
+        confirm = confirm_entry.get()
+
+        if not validate_credentials(login, password):
+            return
+
+        if password != confirm:
+            messagebox.showerror("Ошибка", "Пароли не совпадают!")
+            return
+
+        if user_exists(login):
+            messagebox.showerror("Ошибка", "Пользователь с таким логином уже существует!")
+            return
+
+        password_hash = encrypt_password(password)
+        if save_user(login, password_hash):
+            messagebox.showinfo("Успех", "Регистрация прошла успешно!")
+            root.destroy()
+            show_auth_window(player_num, player1_name)
+        else:
+            messagebox.showerror("Ошибка", "Не удалось сохранить пользователя!")
+
+    def go_back():
+        root.destroy()
+        show_auth_window(player_num, player1_name)
+
+    tk.Button(root, text="Зарегистрироваться", font=("Arial", 12), width=18,
+              command=do_register).pack(pady=20)
+
+    tk.Button(root, text="Назад к авторизации", font=("Arial", 10),
+              command=go_back).pack(pady=10)
+
+    root.mainloop()
+
+def center_window(window, width, height):
+    #Центрирование окна
+    screen_width = window.winfo_screenwidth()
+    screen_height = window.winfo_screenheight()
+    x = (screen_width // 2) - (width // 2)
+    y = (screen_height // 2) - (height // 2)
+    window.geometry(f"{width}x{height}+{x}+{y}")
+
+def on_closing(root):
+    #Закрытие программы
+    try:
+        root.quit()
+        root.destroy()
+    except:
+        pass
+    import sys
+    sys.exit(0)
+
+if __name__ == '__main__':
+    show_start_window()
